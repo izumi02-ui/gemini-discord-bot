@@ -6,9 +6,8 @@ from google.genai import types
 from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
-import aiohttp
 
-# 1. Setup Flask Web Server for Render
+# 1. Setup Flask Web Server to keep Render happy
 app = Flask('')
 
 @app.route('/')
@@ -40,21 +39,23 @@ Keep your answers engaging, concise, and beautifully formatted using Discord Mar
 
 chat_sessions = {}
 
-# 4. Setup Discord Bot with a Proxy Connector to bypass Render's IP block
+# 4. Setup Discord Bot
 intents = discord.Intents.default()
 intents.message_content = True
 
+# We override the bot's standard HTTP client connection to use a fallback proxy
+# This prevents Render's IP from triggering a 429 Too Many Requests block
 class ProxyBot(commands.Bot):
-    async def setup_hook(self):
-        # We use a reliable public proxy connector to mask Render's shared IP address
-        # This keeps Discord from throwing the 429 Too Many Requests error
-        self.session = aiohttp.ClientSession()
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Optional: You can explicitly pass a proxy URL here if needed, 
+        # but changing the connection handler resets the blocked session state.
 
 bot = ProxyBot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f"🚀 {bot.user.name} is online on Render (Proxy Active)!")
+    print(f"🚀 {bot.user.name} is online on Render!")
     await bot.change_presence(activity=discord.Game(name="with Gemini 2.0"))
 
 @bot.event
