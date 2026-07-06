@@ -1,20 +1,20 @@
 import os
 import discord
 from discord.ext import commands
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
 
-# 1. Setup Flask Web Server (For Render keeping it alive)
+# 1. Setup Flask Web Server
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Bot is alive and running!"
+    return "Bot is alive!"
 
 def run_flask():
-    # Render provides a PORT environment variable automatically
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
@@ -27,19 +27,17 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 3. Configure Google Gemini
-genai.configure(api_key=GEMINI_API_KEY)
-SYSTEM_INSTRUCTION = """
+# 3. Configure Modern Google GenAI Client
+client = genai.Client(api_key=GEMINI_API_KEY)
+MODEL_ID = "gemini-2.0-flash"
+
+SYSTEM_PROMPT = """
 You are 'Aether', a highly advanced, intelligent, and witty AI companion.
 You are chatting inside a Discord server. 
 Keep your answers engaging, concise, and beautifully formatted using Discord Markdown.
 """
 
-model = genai.GenerativeModel(
-    model_name="gemini-2.0-flash",
-    system_instruction=SYSTEM_INSTRUCTION
-)
-
+# Dictionary to hold independent chats per channel
 chat_sessions = {}
 
 # 4. Setup Discord Bot
@@ -49,7 +47,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.event
 async def on_ready():
-    print(f"🚀 {bot.user.name} is online and running seamlessly!")
+    print(f"🚀 {bot.user.name} is completely online!")
     await bot.change_presence(activity=discord.Game(name="with Gemini 2.0"))
 
 @bot.event
@@ -67,10 +65,16 @@ async def on_message(message):
             try:
                 channel_id = message.channel.id
                 
-                # FIX: For Gemini 2.0 models, initialize the chat cleanly without forcing an empty list if it's already there
+                # Initialize standard server-managed chat session if missing
                 if channel_id not in chat_sessions:
-                    chat_sessions[channel_id] = model.start_chat()
+                    chat_sessions[channel_id] = client.chats.create(
+                        model=MODEL_ID,
+                        config=types.GenerateContentConfig(
+                            system_instruction=SYSTEM_PROMPT
+                        )
+                    )
                 
+                # Send the message directly through the official chat object
                 response = chat_sessions[channel_id].send_message(user_prompt)
                 ai_reply = response.text
 
@@ -79,14 +83,14 @@ async def on_message(message):
                         await message.channel.send(ai_reply[i:i+2000])
                 else:
                     await message.reply(ai_reply)
+                    
             except Exception as e:
-                # Print the exact error to Render logs so we can see it if it happens again
-                print(f"Gemini API Error: {e}")
-                await message.channel.send("⚠️ Sorry, my circuits encountered an error.")
+                # This prints the specific issue into your Render Logs tab so you can read it
+                print(f"CRITICAL BOT ERROR: {e}")
+                await message.channel.send(f"⚠️ Sorry, my circuits encountered an error.")
 
     await bot.process_commands(message)
 
-# 5. Start Web Server and Run Bot
 if __name__ == "__main__":
-    keep_alive()  # Starts the background web server
+    keep_alive()
     bot.run(DISCORD_TOKEN)
