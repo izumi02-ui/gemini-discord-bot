@@ -66,8 +66,10 @@ async def on_message(message):
         async with message.channel.typing():
             try:
                 channel_id = message.channel.id
+                
+                # FIX: For Gemini 2.0 models, initialize the chat cleanly without forcing an empty list if it's already there
                 if channel_id not in chat_sessions:
-                    chat_sessions[channel_id] = model.start_chat(history=[])
+                    chat_sessions[channel_id] = model.start_chat()
                 
                 response = chat_sessions[channel_id].send_message(user_prompt)
                 ai_reply = response.text
@@ -78,7 +80,8 @@ async def on_message(message):
                 else:
                     await message.reply(ai_reply)
             except Exception as e:
-                print(f"Error: {e}")
+                # Print the exact error to Render logs so we can see it if it happens again
+                print(f"Gemini API Error: {e}")
                 await message.channel.send("⚠️ Sorry, my circuits encountered an error.")
 
     await bot.process_commands(message)
