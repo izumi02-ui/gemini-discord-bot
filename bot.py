@@ -1,4 +1,5 @@
 import os
+import asyncio
 import discord
 from discord.ext import commands
 from google import genai
@@ -7,7 +8,7 @@ from dotenv import load_dotenv
 from flask import Flask
 from threading import Thread
 
-# 1. Setup Flask Web Server to keep Render happy
+# 1. Setup Flask Web Server to keep Render online
 app = Flask('')
 
 @app.route('/')
@@ -27,7 +28,7 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# 3. Configure Gemini
+# 3. Configure Gemini 2.0 Client
 client = genai.Client(api_key=GEMINI_API_KEY)
 MODEL_ID = "gemini-2.0-flash"
 
@@ -37,27 +38,22 @@ You are chatting inside a Discord server.
 Keep your answers engaging, concise, and beautifully formatted using Discord Markdown.
 """
 
-chat_sessions = {}
-
 # 4. Setup Discord Bot
 intents = discord.Intents.default()
 intents.message_content = True
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-# We override the bot's standard HTTP client connection to use a fallback proxy
-# This prevents Render's IP from triggering a 429 Too Many Requests block
-class ProxyBot(commands.Bot):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        # Optional: You can explicitly pass a proxy URL here if needed, 
-        # but changing the connection handler resets the blocked session state.
-
-bot = ProxyBot(command_prefix="!", intents=intents)
+@bot.event
+async def on_ready():
+    print(f"🚀 {bot.user.name} is online on Render!")
+    await bot.change_presence(activity=discord.Game(name="with Gemini 2.0"))
 
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
+    # Trigger when mentioned or in DMs
     if bot.user.mentioned_in(message) or isinstance(message.channel, discord.DMChannel):
         user_prompt = message.content.replace(f'<@{bot.user.id}>', '').strip()
         if not user_prompt:
@@ -66,10 +62,10 @@ async def on_message(message):
 
         async with message.channel.typing():
             try:
-                channel_id = message.channel.id
-                
-                # FIX: We use a standard generation call to avoid the chat object's synchronous block bug on mobile loops
-                response = client.models.generate_content(
+                # FIX: We wrap the synchronous client call inside to_thread
+                # This prevents the bot's gateway loop from freezing and crashing
+                response = await asyncio.to_thread(
+                    client.models.generate_content,
                     model=MODEL_ID,
                     contents=user_prompt,
                     config=types.GenerateContentConfig(
@@ -78,6 +74,7 @@ async def on_message(message):
                 )
                 ai_reply = response.text
 
+                # Split message if it goes over Discord's 2000 character limit
                 if len(ai_reply) > 2000:
                     for i in range(0, len(ai_reply), 2000):
                         await message.channel.send(ai_reply[i:i+2000])
@@ -85,8 +82,8 @@ async def on_message(message):
                     await message.reply(ai_reply)
                     
             except Exception as e:
-                # This will print the EXACT internal API error to your Render logs if it hiccups
-                print(f"GEMINI EXECUTION ERROR: {e}")
+                # This prints the raw API error response directly to your Render Dashboard logs
+                print(f"❌ GEMINI API CRASH LOG: {e}")
                 await message.channel.send("⚠️ Sorry, my circuits encountered an error.")
 
     await bot.process_commands(message)
