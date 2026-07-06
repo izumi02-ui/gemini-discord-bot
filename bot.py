@@ -54,11 +54,6 @@ class ProxyBot(commands.Bot):
 bot = ProxyBot(command_prefix="!", intents=intents)
 
 @bot.event
-async def on_ready():
-    print(f"🚀 {bot.user.name} is online on Render!")
-    await bot.change_presence(activity=discord.Game(name="with Gemini 2.0"))
-
-@bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
@@ -73,15 +68,14 @@ async def on_message(message):
             try:
                 channel_id = message.channel.id
                 
-                if channel_id not in chat_sessions:
-                    chat_sessions[channel_id] = client.chats.create(
-                        model=MODEL_ID,
-                        config=types.GenerateContentConfig(
-                            system_instruction=SYSTEM_PROMPT
-                        )
+                # FIX: We use a standard generation call to avoid the chat object's synchronous block bug on mobile loops
+                response = client.models.generate_content(
+                    model=MODEL_ID,
+                    contents=user_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_PROMPT
                     )
-                
-                response = chat_sessions[channel_id].send_message(user_prompt)
+                )
                 ai_reply = response.text
 
                 if len(ai_reply) > 2000:
@@ -91,7 +85,8 @@ async def on_message(message):
                     await message.reply(ai_reply)
                     
             except Exception as e:
-                print(f"CRITICAL ERROR: {e}")
+                # This will print the EXACT internal API error to your Render logs if it hiccups
+                print(f"GEMINI EXECUTION ERROR: {e}")
                 await message.channel.send("⚠️ Sorry, my circuits encountered an error.")
 
     await bot.process_commands(message)
